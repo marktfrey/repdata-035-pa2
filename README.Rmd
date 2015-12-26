@@ -24,7 +24,8 @@ if (!file.exists("data/noaa_storm_data.bz2")) {
   download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", destfile="data/noaa_storm_data.bz2", method="curl")
 }
 
-noaa <- read.csv('data/noaa_storm_data.bz2', header = TRUE, stringsAsFactors = FALSE)
+noaa <- read.csv('data/noaa_storm_data.bz2', 
+                 header = TRUE, stringsAsFactors = FALSE, strip.white=TRUE)
 dim(noaa)
 ```
 
@@ -64,9 +65,43 @@ print(invalid_crop_magnitude_counts)
 (invalid_crop_magnitude_counts['Sum'] / nonzero_crop_counts['TRUE']) * 100
 ```
 
-Since for both variables these comprise a relatively small number of incidents, we'll simply exclude these incidents from our value calculations.
+Since for both variables these comprise a proportionally very small number of incidents (both less than 0.15 percent), we'll simply exclude these incidents from our value calculations.
 
 To normalize the values, we'll decompress and combine the values for property and crop damage, and combine them into a single total dollar value for each incident.
+
+```{r cache = TRUE}
+# Populate a column with total economic cost per incident
+noaa$economic_cost <- apply(noaa, 1, function(row){
+  pval <- as.numeric(row['PROPDMG'])
+  if (pval == 0 | !grepl('[kKmMbB ]', row['PROPDMGEXP'])){
+    pval <- 0
+  } else if (grepl('^[kK]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000
+  } else if (grepl('^[mM]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000000
+  } else if (grepl('^[bB]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000000000
+  }
+  cval <- as.numeric(row['CROPDMG'])
+  if (cval == 0 | !grepl('[kKmMbB ]', row['CROPDMGEXP'])){
+    cval <- 0
+  } else if (grepl('^[kK]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000
+  } else if (grepl('^[mM]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000000
+  } else if (grepl('^[bB]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000000000
+  }
+  
+  pval + cval
+})
+```
+
+Now we can aggregate economic cost by event type and compare
+```{r cache=TRUE}
+aggregate_cost <- aggregate(noaa$economic_cost, by = list('type' = noaa$EVTYPE), sum)
+aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+```
 
 ---
 
