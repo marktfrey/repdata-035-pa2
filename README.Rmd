@@ -11,10 +11,6 @@ output:
 
 ## ASSUMPTIONS
 
-Per the information here: https://www.ncdc.noaa.gov/stormevents/details.jsp
-
-The data from 1950 - 1955 contains _only_ information from tornadoes.  The data from 1955-1996 is also limited, but contains potentially useful data.  Post 1996, all of the 48 event types should be present.
-
 ---
 
 ## RESULTS
@@ -22,6 +18,18 @@ The data from 1950 - 1955 contains _only_ information from tornadoes.  The data 
 ---
 
 ## DATA PROCESSING
+
+Libraries required include `tm`, `stringdist`, `stringr`, `ggplot2`, `gridExtra`.
+Local system must also have a pdf processor installed.  I used `xpdf` on mac.
+```{r}
+library(tm)         # PDF processing
+library(stringdist) # Approximate string matching
+library(stringr)    # Consistent regex
+library(ggplot2)    # Plots
+library(gridExtra)  # Layout of plots
+```
+
+### SOURCING DATA
 
 First we download and extract the NOAA storm data.
 ```{r cache=TRUE}
@@ -41,9 +49,9 @@ dim(noaa)
 ```
 
 Also let's grab the documentation from http://www.ncdc.noaa.gov/stormevents/pd01016005curr.pdf.
-Linux/Mac package 'xpdf' is required to extract the 48 categories.
+Linux/Mac package 'xpdf' is required to extract the 48 categories. (credit to 
+https://class.coursera.org/repdata-035/forum/thread?thread_id=35 for the idea).
 ```{r}
-library(tm)
 if (!file.exists("data/pd01016005curr.pdf")) {
   download.file("http://www.ncdc.noaa.gov/stormevents/pd01016005curr.pdf", destfile="data/pd01016005curr.pdf", method="curl")
 }
@@ -52,17 +60,202 @@ if (!file.exists("data/pd01016005curr.pdf")) {
 # xpdf on a mac.
 pdf <- readPDF(control = list(c(text = "-layout")))
 pdf <- pdf(elem=list(uri="data/pd01016005curr.pdf"),language="en")
+```
 
+### PROCESSING CATEGORY DATA
+
+We extract the 48 'official' categories from the table of contents in the source document.
+These are matched by their format: 7.(1 or two digit number), space, text, space, event designator in parens.  Then we strip the leading/trailing metainformation.
+```{r cache = TRUE}
 # Extract the 'Event Types' from the table of contents
 toc <- paste(pdf$content[78:91], collapse = ' ')
 
 # Then extract the 48 'official' category names.
 # We match them based on their format: 7.(1 or two digit number), 
 # space, text, space, event designator in parens.
-library(stringr)
-raw_categories <- str_extract_all(toc, "7\\.[:digit:]+\\.? ([^\\)]*) \\([CMZ]\\)")[[1]]
-print(raw_categories)
+categories <- str_extract_all(toc, "7\\.[:digit:]+\\.? ([^\\)]*) \\([CMZ]\\)")[[1]]
+
+# Then we strip the leading/trailing metainformation
+categories <- str_replace(categories, "^7\\.[:digit:]+\\.? ", "")
+categories <- str_replace(categories, "[:space:]+\\([CMZ]\\)$", "")
+
+print(categories)
 ```
+
+### PROCESSING STORM EVENT DATA
+We'll first separate the data into groups by the collection year.
+We need to coerce a date.  For our purposes, we'll determine the event's year
+by the beginning date of the event.
+
+Then we'll assign a 'collection category' corresponding to the information from here:
+http://www.ncdc.noaa.gov/stormevents/details.jsp.  The categories are
+
+- `tornado`: Tornado only
+- `ttws1`: Tornado, Thunderstorm Wind and Hail 1 (manually keyed)
+- `ttws2`: Tornado, Thunderstorm Wind and Hail 2 (text files)
+- `all`: All event types
+
+```{r cache=TRUE}
+noaa$event_date <- as.Date(strptime(noaa$BGN_DATE, "%m/%d/%Y %H:%M:%S"))
+noaa$event_year <- strftime(noaa$event_date, "%Y")
+noaa$collection_category <- apply(noaa, 1, function(row){
+  y <- as.numeric(row['event_year'])
+  if (y < 1955) { 'tornado_only' }
+  else if (y >= 1955 & y < 1993) { 'ttws1' }
+  else if (y >= 1992 & y < 1996) { 'ttws2' }
+  else if (y >= 1996) { 'all' }
+})
+
+table(noaa$collection_category)
+```
+
+Now let's work on shrinking our working dataset a little bit.
+
+We start by removing the columns we don't care about from the dataset.
+```{r cache=TRUE}
+dim(noaa)
+object.size(noaa)
+
+noaa <- subset(noaa, select = c('event_year', 
+                                'collection_category', 
+                                'PROPDMG', 'PROPDMGEXP',
+                                'CROPDMG', 'CROPDMGEXP',
+                                'FATALITIES', 'INJURIES',
+                                'EVTYPE'))
+dim(noaa)
+object.size(noaa)
+```
+
+We're going to disregard the tornado-only data, since it's not likely to be very
+useful in a comparison (there being nothing in those years' data to compare to).
+We'll retain the post-1955 data.
+```{r cache=TRUE}
+noaa <- noaa[noaa$collection_category != 'tornado_only', ]
+dim(noaa)
+object.size(noaa)
+```
+
+We also don't care about entries with no 'population' or 'economic' cost,
+so in this case, if the record doesn't have values for any of 'PROPDMG',
+'CROPDMG', 'FATALITIES', 'INJURIES', we'll let it go.
+
+We'll store this one off to a separate variable, because relative frequency
+of impactful events may be interesting (even if not all of those events cause
+damage).  We don't need or want to normalize the categories for occurrences that
+are ONLY for nonzero economic/personal cost observations.
+```{r}
+noaa_lim <- noaa[rowSums(noaa[ , c('PROPDMG', 'CROPDMG', 'FATALITIES', 'INJURIES')]) > 0, ]
+dim(noaa_lim)
+object.size(noaa_lim)
+```
+
+There are WAY TOO MANY event types listed for the remaining data.
+```{r}
+length(unique(noaa_lim$EVTYPE))
+```
+
+We try to match some of them up to the 48 categories.
+```{r}
+# exact match, not very good.
+table(noaa_lim$EVTYPE %in% categories)
+
+# case normalized string match.  better, but still not very good.
+table(tolower(noaa_lim$EVTYPE) %in% tolower(categories))
+```
+
+H/T https://class.coursera.org/repdata-035/forum/thread?thread_id=8#post-284 for the idea
+to use amatch to correct for typographical errors.  Assuming a max typo/whitespace difference of 3 characters, we see the following
+```{r}
+table(amatch(tolower(noaa_lim$EVTYPE), tolower(categories), maxDist = 3, nomatch = -1))
+```
+
+We partially populate the table, so we're working with fewer records going forward.
+```{r}
+noaa_lim$category <- categories[amatch(tolower(noaa_lim$EVTYPE), tolower(categories), maxDist = 3)]
+```
+
+There are still a bunch of unmatched entries
+
+```{r cache=TRUE}
+head(sort(table(noaa_lim[is.na(noaa_lim$category), ]$EVTYPE), decreasing=TRUE), 20)
+```
+
+but we can clean some/most of these up.
+thunderstorm/tstm wind is the VAST majority of these, and some of the others
+are relatively easy to match.  We'll match all the ones that occur with some
+frequency, and some of the ones that are easy to determine.  We avoid matching things
+that combine categories, or are nondeterminant (like SNOW, it could possibly fit in several 
+of the specified categories)
+
+The process used to match these is as follows:
+
+-  Any `EVTYPE` with 'thunderstorm' or 'tstm', and without 'marine' = `Thunderstorm Wind`
+-  Any `EVTYPE` with both 'flash' and 'flood' = `Flash Flood`
+-  Any remaining `EVTYPE`s with 'flood' = `Flood`
+-  Any `EVTYPE` with both 'wild' and 'fire' = `Wildfire`
+-  Any `EVTYPE` with both 'ext' and 'cold' = `Extreme Cold/Wind Chill`
+-  Any `EVTYPE` with 'landslide' = `Debris Flow`
+-  Any `EVTYPE` with 'storm surge' = `Storm Tide`
+-  Any `EVTYPE` with either 'hurricane' or 'typhoon' = `Hurricane/Typhoon`
+-  Any `EVTYPE` with 'hail' = `Hail`
+-  Any `EVTYPE` with either 'winter' or 'light snow' = `Winter Weather`
+
+```{r}
+# update thunderstorm wind to include anything non-marine with thunderstorm/tstm
+# (other tstorm related issues would be coded as lightning or tornado damage)
+noaa_lim$category <- ifelse( is.na(noaa_lim$category) & 
+                         grepl("(tstm|thunderstorm)", tolower(noaa_lim$EVTYPE)) & 
+                         !grepl("marine", tolower(noaa_lim$EVTYPE)), 
+                         "Thunderstorm Wind", noaa_lim$category)
+
+# Manually take on marine t-storm wind.
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("marine tstm wind", tolower(noaa_lim$EVTYPE)), "Marine Thunderstorm Wind", noaa_lim$category)
+
+# if it matches both 'flash' and 'flood', it's a flash flood
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("flash", tolower(noaa_lim$EVTYPE)) & grepl("flood", tolower(noaa_lim$EVTYPE)), "Flash Flood", noaa_lim$category)
+
+# if it matches 'flood' (or stream fld), it's a 'regular' flood
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("(flood|stream fld)", tolower(noaa_lim$EVTYPE)), "Flood", noaa_lim$category)
+
+# wildfire
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("wild", tolower(noaa_lim$EVTYPE)) & grepl("fire", tolower(noaa_lim$EVTYPE)), "Wildfire", noaa_lim$category)
+
+# extreme cold
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("ext", tolower(noaa_lim$EVTYPE)) & grepl("cold", tolower(noaa_lim$EVTYPE)), "Extreme Cold/Wind Chill", noaa_lim$category)
+
+# Hurricanes / Tsunamis
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("(hurricane|typhoon)", tolower(noaa_lim$EVTYPE)), "Hurricane/Typhoon", noaa_lim$category)
+
+# landslides = debris flow
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("landslide", tolower(noaa_lim$EVTYPE)), "Debris Flow", noaa_lim$category)
+
+# storm surge = storm tide
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("storm surge", tolower(noaa_lim$EVTYPE)), "Storm Tide", noaa_lim$category)
+
+# hail
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("hail", tolower(noaa_lim$EVTYPE)), "Hail", noaa_lim$category)
+
+# probably safe to say 'winter' is winter weather.  We'll allow 'light snow' here too.
+noaa_lim$category <- ifelse(is.na(noaa_lim$category) & grepl("(winter|light snow)", tolower(noaa_lim$EVTYPE)), "Winter Weather", noaa_lim$category)
+```
+
+This takes care of all the uncategorized event types with more than
+100 observations (and nonzero economic/population cost)
+```{r}
+head(sort(table(noaa_lim[is.na(noaa_lim$category), ]$EVTYPE), decreasing=TRUE), 20)
+```
+
+And leaves less than 0.4% of the observations we're interested in outside
+of one of the 48 major categories.
+```{r}
+table(is.na(noaa_lim$category))['TRUE'] / nrow(noaa_lim) * 100
+```
+
+Let's apply the process to the non-limited dataset, so we'll have accurate totals for
+occurrences of each of the types when we look at freqeuencies.
+
+
+---
 
 Since we're looking to determine the economic and human impacts of storm events, we should begin by determining how we'll measure each of these and preparing those data.
 
@@ -82,9 +275,6 @@ aggregate_injuries <- aggregate_injuries[order(aggregate_injuries$x, decreasing 
 aggregate_injuries$event_type <- factor(aggregate_injuries$event_type, levels = aggregate_injuries[order(aggregate_injuries$x, decreasing = TRUE), ]$event_type)
 
 head(aggregate_injuries, 100)
-
-library(ggplot2)
-library(gridExtra)
 
 top100_fatalities <- ggplot(head(aggregate_fatalities, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
 top100_injuries <- ggplot(head(aggregate_injuries, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
@@ -174,9 +364,6 @@ head(aggregate_cost, 25)
 
 Let's take a look at the event types and see if there's a clear cutoff
 ```{r}
-library(ggplot2)
-library(gridExtra)
-
 top_25 <- ggplot(head(aggregate_cost, 25), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
 
 print(top_25)
