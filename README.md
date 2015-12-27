@@ -20,7 +20,7 @@ if (!file.exists("data/noaa_storm_data.bz2")) {
   download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", destfile="data/noaa_storm_data.bz2", method="curl")
 }
 
-noaa <- read.csv('data/noaa_storm_data.bz2', 
+noaa <- read.csv('data/noaa_storm_data.bz2',
                  header = TRUE, stringsAsFactors = FALSE, strip.white=TRUE)
 dim(noaa)
 ```
@@ -33,9 +33,9 @@ Since we're looking to determine the economic and human impacts of storm events,
 
 ### Economic Impact
 
-For economic impact, we'll combine property (`PROPDMG`) and crop (`CROPDMG`) damage into a total dollar value per incident.  
+For economic impact, we'll combine property (`PROPDMG`) and crop (`CROPDMG`) damage into a total dollar value per incident.
 
-In the specification document (https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf, section 2.7) it is indicated that the numeric values of damage estimates are rounded to 3 significant digits, then abbreviated by a magnitude indicator 
+In the specification document (https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf, section 2.7) it is indicated that the numeric values of damage estimates are rounded to 3 significant digits, then abbreviated by a magnitude indicator
 
 > Alphabetical characters used to signify magnitude include “K” for thousands, “M” for millions, and “B” for billions.
 
@@ -128,6 +128,7 @@ noaa$economic_cost <- apply(noaa, 1, function(row){
   } else if (grepl('^[bB]$', row['PROPDMGEXP'])) {
     pval <- pval * 1000000000
   }
+
   cval <- as.numeric(row['CROPDMG'])
   if (cval == 0 | !grepl('[kKmMbB ]', row['CROPDMGEXP'])){
     cval <- 0
@@ -138,16 +139,21 @@ noaa$economic_cost <- apply(noaa, 1, function(row){
   } else if (grepl('^[bB]$', row['CROPDMGEXP'])) {
     cval <- cval * 1000000000
   }
-  
+
   pval + cval
 })
 ```
 
-Now we can aggregate economic cost by event type and compare
+Now we can aggregate economic cost by event type and compare.
+After aggregating, we order the output to be highest aggregate cost to lowest.
+We also convert the event type to a factor and force-reorder the levels in the
+same arrangement (for plotting purposes).
+
 
 ```r
 aggregate_cost <- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
 aggregate_cost <- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
 head(aggregate_cost, 25)
 ```
 
@@ -183,9 +189,6 @@ head(aggregate_cost, 25)
 Let's take a look at the event types and see if there's a clear cutoff
 
 ```r
-# coerce the factor to be ordered in largest-to-smallest
-aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
-
 library(ggplot2)
 ```
 

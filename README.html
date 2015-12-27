@@ -81,7 +81,7 @@ if (!file.exists(&quot;data/noaa_storm_data.bz2&quot;)) {
   download.file(&quot;https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2&quot;, destfile=&quot;data/noaa_storm_data.bz2&quot;, method=&quot;curl&quot;)
 }
 
-noaa &lt;- read.csv('data/noaa_storm_data.bz2', 
+noaa &lt;- read.csv('data/noaa_storm_data.bz2',
                  header = TRUE, stringsAsFactors = FALSE, strip.white=TRUE)
 dim(noaa)</code></pre>
 <pre><code>## [1] 902297     37</code></pre>
@@ -140,6 +140,7 @@ noaa$economic_cost &lt;- apply(noaa, 1, function(row){
   } else if (grepl('^[bB]$', row['PROPDMGEXP'])) {
     pval &lt;- pval * 1000000000
   }
+
   cval &lt;- as.numeric(row['CROPDMG'])
   if (cval == 0 | !grepl('[kKmMbB ]', row['CROPDMGEXP'])){
     cval &lt;- 0
@@ -150,12 +151,13 @@ noaa$economic_cost &lt;- apply(noaa, 1, function(row){
   } else if (grepl('^[bB]$', row['CROPDMGEXP'])) {
     cval &lt;- cval * 1000000000
   }
-  
+
   pval + cval
 })</code></pre>
-<p>Now we can aggregate economic cost by event type and compare</p>
+<p>Now we can aggregate economic cost by event type and compare. After aggregating, we order the output to be highest aggregate cost to lowest. We also convert the event type to a factor and force-reorder the levels in the same arrangement (for plotting purposes).</p>
 <pre class="r"><code>aggregate_cost &lt;- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
 aggregate_cost &lt;- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+aggregate_cost$event_type &lt;- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
 head(aggregate_cost, 25)</code></pre>
 <pre><code>##                     event_type            x
 ## 170                      FLOOD 150319678250
@@ -184,10 +186,7 @@ head(aggregate_cost, 25)</code></pre>
 ## 140               EXTREME COLD   1360710400
 ## 604        SEVERE THUNDERSTORM   1205560000</code></pre>
 <p>Let’s take a look at the event types and see if there’s a clear cutoff</p>
-<pre class="r"><code># coerce the factor to be ordered in largest-to-smallest
-aggregate_cost$event_type &lt;- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
-
-library(ggplot2)</code></pre>
+<pre class="r"><code>library(ggplot2)</code></pre>
 <pre><code>## Warning: package 'ggplot2' was built under R version 3.2.3</code></pre>
 <pre class="r"><code>library(gridExtra)
 
