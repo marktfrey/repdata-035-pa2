@@ -20,7 +20,8 @@ if (!file.exists("data/noaa_storm_data.bz2")) {
   download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", destfile="data/noaa_storm_data.bz2", method="curl")
 }
 
-noaa <- read.csv('data/noaa_storm_data.bz2', header = TRUE, stringsAsFactors = FALSE)
+noaa <- read.csv('data/noaa_storm_data.bz2', 
+                 header = TRUE, stringsAsFactors = FALSE, strip.white=TRUE)
 dim(noaa)
 ```
 
@@ -109,9 +110,98 @@ print(invalid_crop_magnitude_counts)
 ## 0.06787637
 ```
 
-Since for both variables these comprise a relatively small number of incidents, we'll simply exclude these incidents from our value calculations.
+Since for both variables these comprise a proportionally very small number of incidents (both less than 0.15 percent), we'll simply exclude these incidents from our value calculations.
 
 To normalize the values, we'll decompress and combine the values for property and crop damage, and combine them into a single total dollar value for each incident.
+
+
+```r
+# Populate a column with total economic cost per incident
+noaa$economic_cost <- apply(noaa, 1, function(row){
+  pval <- as.numeric(row['PROPDMG'])
+  if (pval == 0 | !grepl('[kKmMbB ]', row['PROPDMGEXP'])){
+    pval <- 0
+  } else if (grepl('^[kK]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000
+  } else if (grepl('^[mM]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000000
+  } else if (grepl('^[bB]$', row['PROPDMGEXP'])) {
+    pval <- pval * 1000000000
+  }
+  cval <- as.numeric(row['CROPDMG'])
+  if (cval == 0 | !grepl('[kKmMbB ]', row['CROPDMGEXP'])){
+    cval <- 0
+  } else if (grepl('^[kK]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000
+  } else if (grepl('^[mM]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000000
+  } else if (grepl('^[bB]$', row['CROPDMGEXP'])) {
+    cval <- cval * 1000000000
+  }
+  
+  pval + cval
+})
+```
+
+Now we can aggregate economic cost by event type and compare
+
+```r
+aggregate_cost <- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
+aggregate_cost <- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+head(aggregate_cost, 25)
+```
+
+```
+##                     event_type            x
+## 170                      FLOOD 150319678250
+## 411          HURRICANE/TYPHOON  71913712800
+## 834                    TORNADO  57352113590
+## 670                STORM SURGE  43323541000
+## 244                       HAIL  18758221170
+## 153                FLASH FLOOD  17562128610
+## 95                     DROUGHT  15018672000
+## 402                  HURRICANE  14610229010
+## 590                RIVER FLOOD  10148404500
+## 427                  ICE STORM   8967041310
+## 848             TROPICAL STORM   8382236550
+## 972               WINTER STORM   6715441250
+## 359                  HIGH WIND   5908617560
+## 957                   WILDFIRE   5060586800
+## 856                  TSTM WIND   5038935790
+## 671           STORM SURGE/TIDE   4642038000
+## 760          THUNDERSTORM WIND   3897964190
+## 408             HURRICANE OPAL   3191846000
+## 955           WILD/FOREST FIRE   3108626330
+## 299  HEAVY RAIN/SEVERE WEATHER   2500000000
+## 786         THUNDERSTORM WINDS   1926607550
+## 842 TORNADOES, TSTM WIND, HAIL   1602500000
+## 290                 HEAVY RAIN   1427647890
+## 140               EXTREME COLD   1360710400
+## 604        SEVERE THUNDERSTORM   1205560000
+```
+
+Let's take a look at the event types and see if there's a clear cutoff
+
+```r
+# coerce the factor to be ordered in largest-to-smallest
+aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
+
+library(ggplot2)
+```
+
+```
+## Warning: package 'ggplot2' was built under R version 3.2.3
+```
+
+```r
+library(gridExtra)
+
+top_25 <- ggplot(head(aggregate_cost, 25), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
+
+print(top_25)
+```
+
+![](README_files/figure-html/unnamed-chunk-5-1.png) 
 
 ---
 

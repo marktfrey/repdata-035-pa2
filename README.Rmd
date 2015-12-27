@@ -99,8 +99,23 @@ noaa$economic_cost <- apply(noaa, 1, function(row){
 
 Now we can aggregate economic cost by event type and compare
 ```{r cache=TRUE}
-aggregate_cost <- aggregate(noaa$economic_cost, by = list('type' = noaa$EVTYPE), sum)
-aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+aggregate_cost <- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
+aggregate_cost <- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
+head(aggregate_cost, 25)
+```
+
+Let's take a look at the event types and see if there's a clear cutoff
+```{r}
+# coerce the factor to be ordered in largest-to-smallest
+aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
+
+library(ggplot2)
+library(gridExtra)
+
+top_25 <- ggplot(head(aggregate_cost, 25), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
+
+print(top_25)
+
 ```
 
 ---
