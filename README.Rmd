@@ -1,5 +1,5 @@
 ---
-title: "Public Health and Economic Consequences of Severe Weather Events, 1950-2011"
+title: "Public Health and Economic Consequences of Severe Weather Events"
 output:
   html_document:
     keep_md: TRUE
@@ -7,19 +7,18 @@ output:
 
 ## SYNOPSIS
 
----
+This study examines the NOAA storm event database to determine which types of weather events are the most harmful to human populations and economically.  After normalizing the data, analyses were based on the data collected between 1996 and 2011, comprised of 48 categories of events.  'Population Cost' was determined by looking separately at fatality and injury counts per event, 'Economic Cost' was determined as a combination of property and crop damage totals. 
 
-## ASSUMPTIONS
+The events with the highest population cost were Excessive Heat events (highest fatalities) and Tornadoes (highest injuries, highest combinied population impact).  Floods/flash floods were also of note from a population cost standpoint.
 
----
-
-## RESULTS
+The events with the highest economic cost were all water-related, with flooding being the most costly.  Also notable in terms of economic damage are hurricanes/typhoons and storm tides.
 
 ---
+
 
 ## DATA PROCESSING
 
-Libraries required include `tm`, `stringdist`, `stringr`, `ggplot2`, `gridExtra`.
+Libraries required include `tm`, `stringdist`, `stringr`, `ggplot2`, `gridExtra`, and `scales`.
 Local system must also have a pdf processor installed.  I used `xpdf` on mac.
 ```{r}
 library(tm)         # PDF processing
@@ -27,6 +26,7 @@ library(stringdist) # Approximate string matching
 library(stringr)    # Consistent regex
 library(ggplot2)    # Plots
 library(gridExtra)  # Layout of plots
+library(scales)     # Non-Scientific Notation Plot Scales
 ```
 
 ### SOURCING DATA
@@ -200,7 +200,7 @@ The process used to match these is as follows:
 -  Any `EVTYPE` with 'hail' = `Hail`
 -  Any `EVTYPE` with either 'winter' or 'light snow' = `Winter Weather`
 
-```{r}
+```{r cache=TRUE}
 # update thunderstorm wind to include anything non-marine with thunderstorm/tstm
 # (other tstorm related issues would be coded as lightning or tornado damage)
 noaa_lim$category <- ifelse( is.na(noaa_lim$category) & 
@@ -254,34 +254,104 @@ table(is.na(noaa_lim$category))['TRUE'] / nrow(noaa_lim) * 100
 Let's apply the process to the non-limited dataset, so we'll have accurate totals for
 occurrences of each of the types when we look at freqeuencies.
 
+```{r cache=TRUE}
+noaa$category <- categories[amatch(tolower(noaa$EVTYPE), tolower(categories), maxDist = 3)]
+noaa$category <- ifelse( is.na(noaa$category) &
+                         grepl("(tstm|thunderstorm)", tolower(noaa$EVTYPE)) &
+                         !grepl("marine", tolower(noaa$EVTYPE)),
+                         "Thunderstorm Wind", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("marine tstm wind", tolower(noaa$EVTYPE)), "Marine Thunderstorm Wind", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("flash", tolower(noaa$EVTYPE)) & grepl("flood", tolower(noaa$EVTYPE)), "Flash Flood", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(flood|stream fld)", tolower(noaa$EVTYPE)), "Flood", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("wild", tolower(noaa$EVTYPE)) & grepl("fire", tolower(noaa$EVTYPE)), "Wildfire", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("ext", tolower(noaa$EVTYPE)) & grepl("cold", tolower(noaa$EVTYPE)), "Extreme Cold/Wind Chill", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(hurricane|typhoon)", tolower(noaa$EVTYPE)), "Hurricane/Typhoon", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("landslide", tolower(noaa$EVTYPE)), "Debris Flow", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("storm surge", tolower(noaa$EVTYPE)), "Storm Tide", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("hail", tolower(noaa$EVTYPE)), "Hail", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(winter|light snow)", tolower(noaa$EVTYPE)), "Winter Weather", noaa$category)
+```
 
 ---
+
+## RESULTS
 
 Since we're looking to determine the economic and human impacts of storm events, we should begin by determining how we'll measure each of these and preparing those data.
 
 ### Human Impact
 
-For `most harmful with respect to population health`, we'll take a look at both fatalities and injuries.
+For `most harmful with respect to population health`, we'll take a look at both fatalities and injuries.  We'll aggregate the totals by category over the entire time period, and facet on collection period (to see if the lower number of categories in the `ttws` periods taints the outcome)
 
 ```{r}
-aggregate_fatalities <- aggregate(noaa$FATALITIES, by = list('event_type' = noaa$EVTYPE), sum)
-aggregate_fatalities <- aggregate_fatalities[order(aggregate_fatalities$x, decreasing = TRUE), ]
-aggregate_fatalities$event_type <- factor(aggregate_fatalities$event_type, levels = aggregate_fatalities[order(aggregate_fatalities$x, decreasing = TRUE), ]$event_type)
+# collect the overall totals for facet ordering
+af <- aggregate(noaa$FATALITIES, 
+                     by = list('category' = noaa$category), 
+                     sum)
+af <- af[order(af$x, decreasing = TRUE), ]
+af$category <- factor(af$category, levels = af[order(af$x, decreasing = TRUE), ]$category)
 
-head(aggregate_fatalities, 100)
+# then collect the faceted set for plotting
+aggregate_fatalities <- aggregate(noaa$FATALITIES, 
+                                  by = list('category' = noaa$category,
+                                            'collection_category' = noaa$collection_category), 
+                                  sum)
 
-aggregate_injuries   <- aggregate(noaa$INJURIES,   by = list('event_type' = noaa$EVTYPE), sum)
-aggregate_injuries <- aggregate_injuries[order(aggregate_injuries$x, decreasing = TRUE), ]
-aggregate_injuries$event_type <- factor(aggregate_injuries$event_type, levels = aggregate_injuries[order(aggregate_injuries$x, decreasing = TRUE), ]$event_type)
+aggregate_fatalities$collection_category <- factor(aggregate_fatalities$collection_category, levels = c('ttws1', 'ttws2', 'all'))
+aggregate_fatalities$category <- factor(aggregate_fatalities$category, levels = af$category)
 
-head(aggregate_injuries, 100)
+# Do the same for injuries
+ai <- aggregate(noaa$INJURIES, 
+                     by = list('category' = noaa$category), 
+                     sum)
+ai <- ai[order(ai$x, decreasing = TRUE), ]
+ai$category <- factor(ai$category, levels = ai[order(ai$x, decreasing = TRUE), ]$category)
 
-top100_fatalities <- ggplot(head(aggregate_fatalities, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
-top100_injuries <- ggplot(head(aggregate_injuries, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
-
-grid.arrange(top100_fatalities, top100_injuries, ncol=1)
+aggregate_injuries   <- aggregate(noaa$INJURIES,
+                                  by = list('category' = noaa$category,
+                                            'collection_category' = noaa$collection_category), 
+                                  sum)
+aggregate_injuries$collection_category <- factor(aggregate_fatalities$collection_category, levels = c('ttws1', 'ttws2', 'all'))
+aggregate_injuries$category <- factor(aggregate_injuries$category, levels = ai$category)
 ```
 
+```{r cache=TRUE}
+top20_fatalities_faceted <- ggplot(aggregate_fatalities[aggregate_fatalities$category %in% head(af$category, 20), ], aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + facet_wrap(~ collection_category) + ggtitle('Fatalities by Category') + ylab('Fatality Count')
+
+top20_injuries_faceted <- ggplot(aggregate_injuries[aggregate_injuries$category %in% head(ai$category, 20), ], aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + facet_wrap(~ collection_category) + ggtitle('Injuries by Category') + ylab('Injury Count')
+
+grid.arrange(top20_fatalities_faceted, top20_injuries_faceted, ncol = 1)
+```
+
+From this we can see that the ttws1 period heavily skews our outcomes toward tornadoes (which were likely logged much more frequently than other weather events during the period).  What's more, not much interesting/useful (comparably) comes from ttws2.  So for the purposes of this examination, we'll focus on the 'all' period (1996 onwards).
+
+Let's re-plot just the 'all observation' periods:
+
+```{r cache=TRUE}
+# let's repeat with only the 'all' period
+noaa_all <- noaa[noaa$collection_category == 'all', ]
+
+af_all <- aggregate(noaa_all$FATALITIES, 
+                    by = list('category' = noaa_all$category), 
+                    sum)
+af_all$category <- factor(af_all$category, levels = af_all[order(af_all$x, decreasing = TRUE), ]$category)
+
+ai_all <- aggregate(noaa_all$INJURIES, 
+                    by = list('category' = noaa_all$category), 
+                    sum)
+ai_all$category <- as.character(ai_all$category)
+ai_all$category <- factor(ai_all$category, levels = ai_all[order(ai_all$x, decreasing = TRUE), ]$category)
+
+# And produce plots for just the 'all'
+top20_fatalities <- ggplot(head(af_all[order(af_all$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Fatalities by Category\n(post-1996 collection period)')  + ylab('Fatality Count')
+
+top20_injuries <- ggplot(head(ai_all[order(ai_all$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Injuries by Category\n(post-1996 collection period)') + ylab('Injury Count')
+
+grid.arrange(top20_fatalities, top20_injuries, ncol = 1)
+```
+
+We can observe from these plots that the highest fatality count is from Excessive Heat, whereas Tornadoes produce far and away the highest number of injuries.  Since tornadoes also produce a very high level of fatalities, any recommendation to focus on particular events for population cost would do well to examine and prepare for Tornadoes and Excessive Heat, and possibly also Flooding/Flash Flooding.
+
+---
 
 ### Economic Impact
 
@@ -350,21 +420,36 @@ noaa$economic_cost <- apply(noaa, 1, function(row){
 })
 ```
 
-Now we can aggregate economic cost by event type and compare.
+Now we can aggregate economic cost by event type and compare. Since we've already determined there is heavy skew in the pre-1996 data, we'll be examining only the post-1996 data here.
 After aggregating, we order the output to be highest aggregate cost to lowest.
 We also convert the event type to a factor and force-reorder the levels in the
 same arrangement (for plotting purposes).
 
 ```{r cache=TRUE}
-aggregate_cost <- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
+noaa_all <- noaa[noaa$collection_category == 'all', ]
+
+aggregate_cost <- aggregate(noaa_all$economic_cost, 
+                            by = list('category' = noaa_all$category), 
+                            sum)
 aggregate_cost <- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
-aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
 head(aggregate_cost, 25)
+
+# Order the categories for the plot
+aggregate_cost$category <- factor(aggregate_cost$category, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$category)
+
 ```
 
-Let's take a look at the event types and see if there's a clear cutoff
+Let's take a look at the event types and see if there's a clear pattern
 ```{r}
-top_25 <- ggplot(head(aggregate_cost, 25), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
+top_25 <- ggplot(head(aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Total Economic Cost\n(post-1996 collection period)')  + ylab('Cost in Dollars') + scale_y_continuous(labels = comma)
 
 print(top_25)
+```
+
+From this analysis, it's pretty clear that Flooding is the most economically harmful weather event type.  Additionally, Hurricanes and Storm Tides (possibly also related to hurricanes or tropical storms) account for a large amount of total economic cost.
+
+```{r}
+occ <- as.data.frame(table(noaa_all$category))
+occ$percent <- round((occ$Freq / nrow(noaa_all)) * 100, 2)
+occ[order(occ$percent, decreasing = TRUE), ]
 ```

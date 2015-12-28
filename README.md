@@ -1,20 +1,19 @@
-# Public Health and Economic Consequences of Severe Weather Events, 1950-2011
+# Public Health and Economic Consequences of Severe Weather Events
 
 ## SYNOPSIS
 
----
+This study examines the NOAA storm event database to determine which types of weather events are the most harmful to human populations and economically.  After normalizing the data, analyses were based on the data collected between 1996 and 2011, comprised of 48 categories of events.  'Population Cost' was determined by looking separately at fatality and injury counts per event, 'Economic Cost' was determined as a combination of property and crop damage totals. 
 
-## ASSUMPTIONS
+The events with the highest population cost were Excessive Heat events (highest fatalities) and Tornadoes (highest injuries, highest combinied population impact).  Floods/flash floods were also of note from a population cost standpoint.
 
----
-
-## RESULTS
+The events with the highest economic cost were all water-related, with flooding being the most costly.  Also notable in terms of economic damage are hurricanes/typhoons and storm tides.
 
 ---
+
 
 ## DATA PROCESSING
 
-Libraries required include `tm`, `stringdist`, `stringr`, `ggplot2`, `gridExtra`.
+Libraries required include `tm`, `stringdist`, `stringr`, `ggplot2`, `gridExtra`, and `scales`.
 Local system must also have a pdf processor installed.  I used `xpdf` on mac.
 
 ```r
@@ -46,6 +45,7 @@ library(ggplot2)    # Plots
 
 ```r
 library(gridExtra)  # Layout of plots
+library(scales)     # Non-Scientific Notation Plot Scales
 ```
 
 ### SOURCING DATA
@@ -443,248 +443,111 @@ Let's apply the process to the non-limited dataset, so we'll have accurate total
 occurrences of each of the types when we look at freqeuencies.
 
 
+```r
+noaa$category <- categories[amatch(tolower(noaa$EVTYPE), tolower(categories), maxDist = 3)]
+noaa$category <- ifelse( is.na(noaa$category) &
+                         grepl("(tstm|thunderstorm)", tolower(noaa$EVTYPE)) &
+                         !grepl("marine", tolower(noaa$EVTYPE)),
+                         "Thunderstorm Wind", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("marine tstm wind", tolower(noaa$EVTYPE)), "Marine Thunderstorm Wind", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("flash", tolower(noaa$EVTYPE)) & grepl("flood", tolower(noaa$EVTYPE)), "Flash Flood", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(flood|stream fld)", tolower(noaa$EVTYPE)), "Flood", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("wild", tolower(noaa$EVTYPE)) & grepl("fire", tolower(noaa$EVTYPE)), "Wildfire", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("ext", tolower(noaa$EVTYPE)) & grepl("cold", tolower(noaa$EVTYPE)), "Extreme Cold/Wind Chill", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(hurricane|typhoon)", tolower(noaa$EVTYPE)), "Hurricane/Typhoon", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("landslide", tolower(noaa$EVTYPE)), "Debris Flow", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("storm surge", tolower(noaa$EVTYPE)), "Storm Tide", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("hail", tolower(noaa$EVTYPE)), "Hail", noaa$category)
+noaa$category <- ifelse(is.na(noaa$category) & grepl("(winter|light snow)", tolower(noaa$EVTYPE)), "Winter Weather", noaa$category)
+```
+
 ---
+
+## RESULTS
 
 Since we're looking to determine the economic and human impacts of storm events, we should begin by determining how we'll measure each of these and preparing those data.
 
 ### Human Impact
 
-For `most harmful with respect to population health`, we'll take a look at both fatalities and injuries.
+For `most harmful with respect to population health`, we'll take a look at both fatalities and injuries.  We'll aggregate the totals by category over the entire time period, and facet on collection period (to see if the lower number of categories in the `ttws` periods taints the outcome)
 
 
 ```r
-aggregate_fatalities <- aggregate(noaa$FATALITIES, by = list('event_type' = noaa$EVTYPE), sum)
-aggregate_fatalities <- aggregate_fatalities[order(aggregate_fatalities$x, decreasing = TRUE), ]
-aggregate_fatalities$event_type <- factor(aggregate_fatalities$event_type, levels = aggregate_fatalities[order(aggregate_fatalities$x, decreasing = TRUE), ]$event_type)
+# collect the overall totals for facet ordering
+af <- aggregate(noaa$FATALITIES, 
+                     by = list('category' = noaa$category), 
+                     sum)
+af <- af[order(af$x, decreasing = TRUE), ]
+af$category <- factor(af$category, levels = af[order(af$x, decreasing = TRUE), ]$category)
 
-head(aggregate_fatalities, 100)
+# then collect the faceted set for plotting
+aggregate_fatalities <- aggregate(noaa$FATALITIES, 
+                                  by = list('category' = noaa$category,
+                                            'collection_category' = noaa$collection_category), 
+                                  sum)
+
+aggregate_fatalities$collection_category <- factor(aggregate_fatalities$collection_category, levels = c('ttws1', 'ttws2', 'all'))
+aggregate_fatalities$category <- factor(aggregate_fatalities$category, levels = af$category)
+
+# Do the same for injuries
+ai <- aggregate(noaa$INJURIES, 
+                     by = list('category' = noaa$category), 
+                     sum)
+ai <- ai[order(ai$x, decreasing = TRUE), ]
+ai$category <- factor(ai$category, levels = ai[order(ai$x, decreasing = TRUE), ]$category)
+
+aggregate_injuries   <- aggregate(noaa$INJURIES,
+                                  by = list('category' = noaa$category,
+                                            'collection_category' = noaa$collection_category), 
+                                  sum)
+aggregate_injuries$collection_category <- factor(aggregate_fatalities$collection_category, levels = c('ttws1', 'ttws2', 'all'))
+aggregate_injuries$category <- factor(aggregate_injuries$category, levels = ai$category)
 ```
 
-```
-##                     event_type    x
-## 834                    TORNADO 4744
-## 130             EXCESSIVE HEAT 1903
-## 153                FLASH FLOOD  978
-## 275                       HEAT  937
-## 464                  LIGHTNING  816
-## 856                  TSTM WIND  504
-## 170                      FLOOD  470
-## 585                RIP CURRENT  368
-## 359                  HIGH WIND  248
-## 19                   AVALANCHE  224
-## 972               WINTER STORM  206
-## 586               RIP CURRENTS  204
-## 278                  HEAT WAVE  172
-## 140               EXTREME COLD  160
-## 760          THUNDERSTORM WIND  133
-## 310                 HEAVY SNOW  127
-## 141    EXTREME COLD/WIND CHILL  125
-## 676                STRONG WIND  103
-## 30                    BLIZZARD  101
-## 350                  HIGH SURF  101
-## 290                 HEAVY RAIN   98
-## 142               EXTREME HEAT   96
-## 79             COLD/WIND CHILL   95
-## 427                  ICE STORM   89
-## 957                   WILDFIRE   75
-## 411          HURRICANE/TYPHOON   64
-## 786         THUNDERSTORM WINDS   64
-## 188                        FOG   62
-## 402                  HURRICANE   61
-## 848             TROPICAL STORM   58
-## 342       HEAVY SURF/HIGH SURF   42
-## 442                  LANDSLIDE   38
-## 66                        COLD   35
-## 376                 HIGH WINDS   35
-## 877                    TSUNAMI   33
-## 978             WINTER WEATHER   33
-## 888  UNSEASONABLY WARM AND DRY   29
-## 919       URBAN/SML STREAM FLD   28
-## 980         WINTER WEATHER/MIX   28
-## 842 TORNADOES, TSTM WIND, HAIL   25
-## 960                       WIND   23
-## 117                 DUST STORM   22
-## 164             FLASH FLOODING   19
-## 89                   DENSE FOG   18
-## 146          EXTREME WINDCHILL   17
-## 177          FLOOD/FLASH FLOOD   17
-## 580      RECORD/EXCESSIVE HEAT   17
-## 244                       HAIL   15
-## 72               COLD AND SNOW   14
-## 161          FLASH FLOOD/FLOOD   14
-## 488         MARINE STRONG WIND   14
-## 670                STORM SURGE   13
-## 955           WILD/FOREST FIRE   12
-## 671           STORM SURGE/TIDE   11
-## 886          UNSEASONABLY WARM   11
-## 489   MARINE THUNDERSTORM WIND   10
-## 976              WINTER STORMS   10
-## 490           MARINE TSTM WIND    9
-## 596                 ROUGH SEAS    8
-## 851      TROPICAL STORM GORDON    8
-## 201              FREEZING RAIN    7
-## 222                      GLAZE    7
-## 339                 HEAVY SURF    7
-## 480            LOW TEMPERATURE    7
-## 487              MARINE MISHAP    7
-## 680               STRONG WINDS    7
-## 185                   FLOODING    6
-## 405             HURRICANE ERIN    6
-## 417                        ICE    6
-## 77                COLD WEATHER    5
-## 165       FLASH FLOODING/FLOOD    5
-## 280                 HEAT WAVES    5
-## 348                  HIGH SEAS    5
-## 435                  ICY ROADS    5
-## 588    RIP CURRENTS/HEAVY SURF    5
-## 629                       SNOW    5
-## 873             TSTM WIND/HAIL    5
-## 243                GUSTY WINDS    4
-## 279          HEAT WAVE DROUGHT    4
-## 373             HIGH WIND/SEAS    4
-## 415       Hypothermia/Exposure    4
-## 517                   Mudslide    4
-## 544                  RAIN/SNOW    4
-## 597                 ROUGH SURF    4
-## 636               SNOW AND ICE    4
-## 54               COASTAL FLOOD    3
-## 60               COASTAL STORM    3
-## 65                        Cold    3
-## 76                   COLD WAVE    3
-## 101             DRY MICROBURST    3
-## 307                 HEAVY SEAS    3
-## 340        Heavy surf and wind    3
-## 349                  High Surf    3
-## 356                 HIGH WATER    3
-## 366         HIGH WIND AND SEAS    3
-## 395            HIGH WINDS/SNOW    3
-## 416       HYPOTHERMIA/EXPOSURE    3
-## 936                 WATERSPOUT    3
-## 943         WATERSPOUT/TORNADO    3
-## 954                 WILD FIRES    3
-```
 
 ```r
-aggregate_injuries   <- aggregate(noaa$INJURIES,   by = list('event_type' = noaa$EVTYPE), sum)
-aggregate_injuries <- aggregate_injuries[order(aggregate_injuries$x, decreasing = TRUE), ]
-aggregate_injuries$event_type <- factor(aggregate_injuries$event_type, levels = aggregate_injuries[order(aggregate_injuries$x, decreasing = TRUE), ]$event_type)
+top20_fatalities_faceted <- ggplot(aggregate_fatalities[aggregate_fatalities$category %in% head(af$category, 20), ], aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + facet_wrap(~ collection_category) + ggtitle('Fatalities by Category') + ylab('Fatality Count')
 
-head(aggregate_injuries, 100)
+top20_injuries_faceted <- ggplot(aggregate_injuries[aggregate_injuries$category %in% head(ai$category, 20), ], aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + facet_wrap(~ collection_category) + ggtitle('Injuries by Category') + ylab('Injury Count')
+
+grid.arrange(top20_fatalities_faceted, top20_injuries_faceted, ncol = 1)
 ```
 
-```
-##                   event_type     x
-## 834                  TORNADO 82402
-## 856                TSTM WIND  6957
-## 170                    FLOOD  6789
-## 130           EXCESSIVE HEAT  6525
-## 464                LIGHTNING  5230
-## 275                     HEAT  2100
-## 427                ICE STORM  1975
-## 153              FLASH FLOOD  1777
-## 760        THUNDERSTORM WIND  1488
-## 244                     HAIL  1361
-## 972             WINTER STORM  1321
-## 411        HURRICANE/TYPHOON  1275
-## 359                HIGH WIND  1137
-## 310               HEAVY SNOW  1021
-## 957                 WILDFIRE   911
-## 786       THUNDERSTORM WINDS   908
-## 30                  BLIZZARD   805
-## 188                      FOG   734
-## 955         WILD/FOREST FIRE   545
-## 117               DUST STORM   440
-## 978           WINTER WEATHER   398
-## 89                 DENSE FOG   342
-## 848           TROPICAL STORM   340
-## 278                HEAT WAVE   309
-## 376               HIGH WINDS   302
-## 586             RIP CURRENTS   297
-## 676              STRONG WIND   280
-## 290               HEAVY RAIN   251
-## 585              RIP CURRENT   232
-## 140             EXTREME COLD   231
-## 222                    GLAZE   216
-## 19                 AVALANCHE   170
-## 142             EXTREME HEAT   155
-## 350                HIGH SURF   152
-## 954               WILD FIRES   150
-## 417                      ICE   137
-## 877                  TSUNAMI   129
-## 873           TSTM WIND/HAIL    95
-## 960                     WIND    86
-## 919     URBAN/SML STREAM FLD    79
-## 984               WINTRY MIX    77
-## 980       WINTER WEATHER/MIX    72
-## 277                Heat Wave    70
-## 979       WINTER WEATHER MIX    68
-## 442                LANDSLIDE    52
-## 557              RECORD HEAT    50
-## 66                      COLD    48
-## 342     HEAVY SURF/HIGH SURF    48
-## 402                HURRICANE    46
-## 851    TROPICAL STORM GORDON    43
-## 115               DUST DEVIL    42
-## 943       WATERSPOUT/TORNADO    42
-## 339               HEAVY SURF    40
-## 670              STORM SURGE    38
-## 656          SNOW/HIGH WINDS    36
-## 645              SNOW SQUALL    35
-## 435                ICY ROADS    31
-## 629                     SNOW    29
-## 936               WATERSPOUT    29
-## 101           DRY MICROBURST    28
-## 821            THUNDERSTORMW    27
-## 489 MARINE THUNDERSTORM WIND    26
-## 501             MIXED PRECIP    26
-## 29                 BLACK ICE    24
-## 141  EXTREME COLD/WIND CHILL    24
-## 201            FREEZING RAIN    23
-## 488       MARINE STRONG WIND    22
-## 134       EXCESSIVE RAINFALL    21
-## 680             STRONG WINDS    21
-## 366       HIGH WIND AND SEAS    20
-## 886        UNSEASONABLY WARM    17
-## 976            WINTER STORMS    17
-## 838               TORNADO F2    16
-## 177        FLOOD/FLASH FLOOD    15
-## 195         FREEZING DRIZZLE    15
-## 224          GLAZE/ICE STORM    15
-## 279        HEAT WAVE DROUGHT    15
-## 973  WINTER STORM HIGH WINDS    15
-## 44              BLOWING SNOW    13
-## 79           COLD/WIND CHILL    12
-## 753             THUNDERSTORM    12
-## 331           HEAVY SNOW/ICE    10
-## 617               SMALL HAIL    10
-## 754      THUNDERSTORM  WINDS    10
-## 164           FLASH FLOODING     8
-## 243              GUSTY WINDS     8
-## 348                HIGH SEAS     8
-## 490         MARINE TSTM WIND     8
-## 526   NON-SEVERE WIND DAMAGE     7
-## 395          HIGH WINDS/SNOW     6
-## 58  COASTAL FLOODING/EROSION     5
-## 146        EXTREME WINDCHILL     5
-## 487            MARINE MISHAP     5
-## 596               ROUGH SEAS     5
-## 671         STORM SURGE/TIDE     5
-## 879                  TYPHOON     5
-## 95                   DROUGHT     4
-## 305              HEAVY RAINS     4
-## 349                High Surf     4
-## 392          HIGH WINDS/COLD     4
-```
+![](README_files/figure-html/unnamed-chunk-19-1.png) 
+
+From this we can see that the ttws1 period heavily skews our outcomes toward tornadoes (which were likely logged much more frequently than other weather events during the period).  What's more, not much interesting/useful (comparably) comes from ttws2.  So for the purposes of this examination, we'll focus on the 'all' period (1996 onwards).
+
+Let's re-plot just the 'all observation' periods:
+
 
 ```r
-top100_fatalities <- ggplot(head(aggregate_fatalities, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
-top100_injuries <- ggplot(head(aggregate_injuries, 20), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
+# let's repeat with only the 'all' period
+noaa_all <- noaa[noaa$collection_category == 'all', ]
 
-grid.arrange(top100_fatalities, top100_injuries, ncol=1)
+af_all <- aggregate(noaa_all$FATALITIES, 
+                    by = list('category' = noaa_all$category), 
+                    sum)
+af_all$category <- factor(af_all$category, levels = af_all[order(af_all$x, decreasing = TRUE), ]$category)
+
+ai_all <- aggregate(noaa_all$INJURIES, 
+                    by = list('category' = noaa_all$category), 
+                    sum)
+ai_all$category <- as.character(ai_all$category)
+ai_all$category <- factor(ai_all$category, levels = ai_all[order(ai_all$x, decreasing = TRUE), ]$category)
+
+# And produce plots for just the 'all'
+top20_fatalities <- ggplot(head(af_all[order(af_all$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Fatalities by Category\n(post-1996 collection period)')  + ylab('Fatality Count')
+
+top20_injuries <- ggplot(head(ai_all[order(ai_all$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Injuries by Category\n(post-1996 collection period)') + ylab('Injury Count')
+
+grid.arrange(top20_fatalities, top20_injuries, ncol = 1)
 ```
 
-![](README_files/figure-html/unnamed-chunk-17-1.png) 
+![](README_files/figure-html/unnamed-chunk-20-1.png) 
 
+We can observe from these plots that the highest fatality count is from Excessive Heat, whereas Tornadoes produce far and away the highest number of injuries.  Since tornadoes also produce a very high level of fatalities, any recommendation to focus on particular events for population cost would do well to examine and prepare for Tornadoes and Excessive Heat, and possibly also Flooding/Flash Flooding.
+
+---
 
 ### Economic Impact
 
@@ -799,54 +662,64 @@ noaa$economic_cost <- apply(noaa, 1, function(row){
 })
 ```
 
-Now we can aggregate economic cost by event type and compare.
+Now we can aggregate economic cost by event type and compare. Since we've already determined there is heavy skew in the pre-1996 data, we'll be examining only the post-1996 data here.
 After aggregating, we order the output to be highest aggregate cost to lowest.
 We also convert the event type to a factor and force-reorder the levels in the
 same arrangement (for plotting purposes).
 
 
 ```r
-aggregate_cost <- aggregate(noaa$economic_cost, by = list('event_type' = noaa$EVTYPE), sum)
+noaa_all <- noaa[noaa$collection_category == 'all', ]
+
+aggregate_cost <- aggregate(noaa_all$economic_cost, 
+                            by = list('category' = noaa_all$category), 
+                            sum)
 aggregate_cost <- aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]
-aggregate_cost$event_type <- factor(aggregate_cost$event_type, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$event_type)
 head(aggregate_cost, 25)
 ```
 
 ```
-##                     event_type            x
-## 170                      FLOOD 150319678250
-## 411          HURRICANE/TYPHOON  71913712800
-## 834                    TORNADO  56476113690
-## 670                STORM SURGE  43323541000
-## 244                       HAIL  18758221170
-## 153                FLASH FLOOD  17562128610
-## 95                     DROUGHT  15018672000
-## 402                  HURRICANE  14610229010
-## 590                RIVER FLOOD  10148404500
-## 427                  ICE STORM   8967041310
-## 848             TROPICAL STORM   8382236550
-## 972               WINTER STORM   6715441250
-## 359                  HIGH WIND   5908617560
-## 957                   WILDFIRE   5060586800
-## 856                  TSTM WIND   5038935790
-## 671           STORM SURGE/TIDE   4642038000
-## 760          THUNDERSTORM WIND   3897964190
-## 408             HURRICANE OPAL   3191846000
-## 955           WILD/FOREST FIRE   3108626330
-## 299  HEAVY RAIN/SEVERE WEATHER   2500000000
-## 786         THUNDERSTORM WINDS   1926607550
-## 842 TORNADOES, TSTM WIND, HAIL   1602500000
-## 290                 HEAVY RAIN   1427647890
-## 140               EXTREME COLD   1360710400
-## 604        SEVERE THUNDERSTORM   1205560000
+##                   category            x
+## 15                   Flood 149207700200
+## 25       Hurricane/Typhoon  87068996810
+## 37              Storm Tide  47835579000
+## 40                 Tornado  24900370720
+## 19                    Hail  17092605870
+## 14             Flash Flood  16557170610
+## 9                  Drought  14413667000
+## 39       Thunderstorm Wind   8930538480
+## 42          Tropical Storm   8320186550
+## 46                Wildfire   8162704630
+## 24               High Wind   5881921660
+## 26               Ice Storm   3657908810
+## 47            Winter Storm   1544687250
+## 13 Extreme Cold/Wind Chill   1337531400
+## 21              Heavy Rain   1313034240
+## 17            Frost/Freeze   1104666000
+## 29               Lightning    749975520
+## 22              Heavy Snow    706929640
+## 3                 Blizzard    532718950
+## 12          Excessive Heat    500125700
+## 4            Coastal Flood    355209560
+## 6              Debris Flow    344600000
+## 38             Strong Wind    241947740
+## 43                 Tsunami    144082000
+## 23               High Surf     83929500
 ```
 
-Let's take a look at the event types and see if there's a clear cutoff
+```r
+# Order the categories for the plot
+aggregate_cost$category <- factor(aggregate_cost$category, levels = aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ]$category)
+```
+
+Let's take a look at the event types and see if there's a clear pattern
 
 ```r
-top_25 <- ggplot(head(aggregate_cost, 25), aes(x = event_type, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred')
+top_25 <- ggplot(head(aggregate_cost[order(aggregate_cost$x, decreasing = TRUE), ], 20), aes(x = category, y = x, fill = x)) + geom_bar(stat = 'identity') + scale_fill_gradient2(mid='lightgrey', high='darkred') + coord_flip() + ggtitle('Total Economic Cost\n(post-1996 collection period)')  + ylab('Cost in Dollars') + scale_y_continuous(labels = comma)
 
 print(top_25)
 ```
 
-![](README_files/figure-html/unnamed-chunk-21-1.png) 
+![](README_files/figure-html/unnamed-chunk-24-1.png) 
+
+From this analysis, it's pretty clear that Flooding is the most economically harmful weather event type.  Additionally, Hurricanes and Storm Tides (possibly also related to hurricanes or tropical storms) account for a large amount of total economic cost.
